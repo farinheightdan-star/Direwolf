@@ -1,158 +1,130 @@
-@@ -0,0 +1,157 @@
 import os
 import json
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
-    MessageHandler,
     CommandHandler,
+    MessageHandler,
     filters,
-    ContextTypes,
+    ContextTypes
 )
-from openai import OpenAI
+import openai
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# -----------------------------
+# Setup
+# -----------------------------
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-BOT_USERNAME = "@web3wolfbot"
+client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+# Memory file
 MEMORY_FILE = "memory.json"
 
-# Load memory
-def load_memory():
-    try:
-        with open(MEMORY_FILE, "r") as f:
-            return json.load(f)
-    except:
-        return {}
+# Load memory or initialize
+if os.path.exists(MEMORY_FILE):
+    with open(MEMORY_FILE, "r") as f:
+        memory = json.load(f)
+else:
+    memory = {}
 
-def save_memory(memory):
+# -----------------------------
+# Helper functions
+# -----------------------------
+def save_memory():
     with open(MEMORY_FILE, "w") as f:
         json.dump(memory, f)
 
-memory = load_memory()
-
-SYSTEM_PROMPT = """
-You are Direwolf (Wolf), a Web3 strategic sales operator.
-
-Mission:
-Close deals with launchpads, incubators, exchanges, and Web3 projects.
-
-Rules:
-- Precision over fluff.
-- Identify leverage.
-- Convert features to strategic advantage.
-- Be persuasive and data-driven.
-- Stay concise.
-
-Response Structure:
-1. Situation Analysis
-2. Leverage
-3. Strategic Angle
-4. Suggested Outreach
-"""
-
-async def ai_response(user_id, user_message):
-
-    user_memory = memory.get(str(user_id), {})
-    product_context = user_memory.get("product", "No product set.")
-
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "system", "content": f"User Product Context: {product_context}"},
-        {"role": "user", "content": user_message},
-    ]
-
+async def call_openai(prompt):
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=messages,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=250
     )
+    return response.choices[0].message.content.strip()
 
-    return response.choices[0].message.content
-
-
-# COMMANDS
+# -----------------------------
+# Command Handlers
+# -----------------------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🐺 Direwolf online! Use /setproduct to save your product.")
 
 async def set_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    product_info = " ".join(context.args)
-
-    if not product_info:
-        await update.message.reply_text("Usage: /setproduct Describe your product.")
+    user_id = str(update.message.from_user.id)
+    if len(context.args) == 0:
+        await update.message.reply_text("Usage: /setproduct <your product description>")
         return
-
-    memory[str(user_id)] = {"product": product_info}
-    save_memory(memory)
-
-    await update.message.reply_text("Product context saved.")
-
+    product_info = " ".join(context.args)
+    memory[user_id] = {"product": product_info}
+    save_memory()
+    await update.message.reply_text(f"Product saved: {product_info}")
 
 async def analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    text = " ".join(context.args)
-
-    if not text:
-        await update.message.reply_text("Usage: /analyze Describe the situation.")
+    user_id = str(update.message.from_user.id)
+    if user_id not in memory:
+        await update.message.reply_text("No product set. Use /setproduct first.")
         return
-
-    reply = await ai_response(user_id, f"Analyze this: {text}")
-    await update.message.reply_text(reply)
-
+    product_info = memory[user_id]["product"]
+    prompt = f"Give a smart, tactical analysis for pitching this product: {product_info}"
+    result = await call_openai(prompt)
+    await update.message.reply_text(result)
 
 async def pitch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    target = " ".join(context.args)
-
-    if not target:
-        await update.message.reply_text("Usage: /pitch Target description.")
+    user_id = str(update.message.from_user.id)
+    if user_id not in memory:
+        await update.message.reply_text("No product set. Use /setproduct first.")
         return
-
-    reply = await ai_response(user_id, f"Craft a cold outreach pitch for: {target}")
-    await update.message.reply_text(reply)
-
+    product_info = memory[user_id]["product"]
+    prompt = f"Write a persuasive cold DM pitch for this product: {product_info}"
+    result = await call_openai(prompt)
+    await update.message.reply_text(result)
 
 async def objection(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    objection_text = " ".join(context.args)
-
-    if not objection_text:
-        await update.message.reply_text("Usage: /objection Paste founder objection.")
+    if len(context.args) == 0:
+        await update.message.reply_text("Usage: /objection <objection text>")
         return
-
-    reply = await ai_response(user_id, f"Handle this objection: {objection_text}")
-    await update.message.reply_text(reply)
-
+    objection_text = " ".join(context.args)
+    user_id = str(update.message.from_user.id)
+    product_info = memory.get(user_id, {}).get("product", "your product")
+    prompt = f"How to answer this objection tactically for the product '{product_info}': {objection_text}"
+    result = await call_openai(prompt)
+    await update.message.reply_text(result)
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    memory.pop(str(user_id), None)
-    save_memory(memory)
-    await update.message.reply_text("Memory reset.")
+    user_id = str(update.message.from_user.id)
+    if user_id in memory:
+        memory.pop(user_id)
+        save_memory()
+    await update.message.reply_text("Memory cleared. You can set a new product with /setproduct.")
 
+# -----------------------------
+# Default message handler
+# -----------------------------
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Unknown command. Try /start, /setproduct, /analyze, /pitch, /objection, /reset")
 
-# NORMAL CHAT HANDLER
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message:
-        return
+# -----------------------------
+# Main Application
+# -----------------------------
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    text = update.message.text
+    # Commands
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("setproduct", set_product))
+    app.add_handler(CommandHandler("analyze", analyze))
+    app.add_handler(CommandHandler("pitch", pitch))
+    app.add_handler(CommandHandler("objection", objection))
+    app.add_handler(CommandHandler("reset", reset))
 
-    if update.message.chat.type != "private":
-        if BOT_USERNAME not in text:
-            return
-        text = text.replace(BOT_USERNAME, "").strip()
+    # Unknown commands
+    app.add_handler(MessageHandler(filters.COMMAND, unknown))
 
-    user_id = update.effective_user.id
-    reply = await ai_response(user_id, text)
-    await update.message.reply_text(reply)
+    # Start polling
+    print("🐺 Direwolf is online and polling...")
+    app.run_polling()
 
-
-app = ApplicationBuilder().token(os.getenv("BOT_TOKEN")).build()
-
-app.add_handler(CommandHandler("setproduct", set_product))
-app.add_handler(CommandHandler("analyze", analyze))
-app.add_handler(CommandHandler("pitch", pitch))
-app.add_handler(CommandHandler("objection", objection))
-app.add_handler(CommandHandler("reset", reset))
-
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-app.run_polling()
+# -----------------------------
+if __name__ == "__main__":
+    main()
