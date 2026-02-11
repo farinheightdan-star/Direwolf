@@ -47,7 +47,9 @@ async def call_openai(prompt):
 # Command Handlers
 # -----------------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🐺 Direwolf online! Chat with me or use /setproduct to save your product.")
+    await update.message.reply_text(
+        "🐺 Direwolf online! Chat with me freely or use /setproduct to save your product."
+    )
 
 async def set_product(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
@@ -64,21 +66,24 @@ async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in memory:
         memory.pop(user_id)
         save_memory()
-    await update.message.reply_text("Memory cleared. You can set a new product with /setproduct.")
+    await update.message.reply_text("Memory cleared. Use /setproduct to set a new product.")
 
 # -----------------------------
-# Free Chat Handler (AI conversation)
+# Free Chat Handler
 # -----------------------------
 async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message is None or update.message.text is None:
+        return  # ignore non-text messages
+
     user_id = str(update.message.from_user.id)
     user_message = update.message.text
 
-    # If product is set, include it in the prompt
+    # Include product info if set
     product_info = memory.get(user_id, {}).get("product", "")
     if product_info:
-        prompt = f"Act as a tactical, persuasive Web3 sales AI named Direwolf. Product: {product_info}. Reply to the user tactically and helpfully: {user_message}"
+        prompt = f"Act as a tactical, calm, persuasive Web3 sales AI named Direwolf. Product: {product_info}. Reply to this user tactically: {user_message}"
     else:
-        prompt = f"Act as a tactical, persuasive Web3 sales AI named Direwolf. Reply to the user tactically and helpfully: {user_message}"
+        prompt = f"Act as a tactical, calm, persuasive Web3 sales AI named Direwolf. Reply to this user tactically: {user_message}"
 
     reply = await call_openai(prompt)
     await update.message.reply_text(reply)
@@ -89,12 +94,13 @@ async def chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Command handlers
+    # Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("setproduct", set_product))
     app.add_handler(CommandHandler("reset", reset))
 
-    # Free text handler (responds to any message)
+    # Free chat handler for all text messages
+    # Important: filters.TEXT catches all text messages, even in groups if mentioned
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), chat))
 
     print("🐺 Direwolf is online and polling...")
